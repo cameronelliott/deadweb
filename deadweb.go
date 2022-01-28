@@ -1,6 +1,7 @@
 package deadweb
 
 import (
+	"bytes"
 	"io"
 	"io/fs"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+
 	"github.com/yuin/goldmark"
 )
 
@@ -32,11 +34,22 @@ func FileServer(fs fs.FS, parseEvery bool) (http.Handler, error) {
 	}
 
 	x := &fileServer{xfs: fs, tmp: tmpl}
-
 	return x, nil
 }
 
+func existsFile(z fs.FS, path string) {
+
+}
+
 func (x *fileServer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+	upath := r.URL.Path
+	if !strings.HasPrefix(upath, "/") {
+		upath = "/" + upath
+		r.URL.Path = upath
+	}
+	fp := filepath.Clean(filepath.Join(".", filepath.Clean(r.URL.Path)))
+
+	println(fp)
 
 	var tmpl *template.Template
 	var err error
@@ -54,8 +67,6 @@ func (x *fileServer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 		tmpl = x.tmp
 	}
 
-	fp := filepath.Join(".", filepath.Clean(r.URL.Path))
-
 	// Return a 404 if the template doesn't exist
 	info, err := fs.Stat(x.xfs, fp)
 	if err != nil {
@@ -70,26 +81,42 @@ func (x *fileServer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 
 	// Return a 404 if the request is for a directory
 	if info.IsDir() {
-		http.NotFound(rw, r)
-		return
+		fp = filepath.Join(fp, "index.html")
+
+		info, err := fs.Stat(x.xfs, fp)
+		if err != nil {
+			if os.IsNotExist(err) {
+				http.NotFound(rw, r)
+				return
+			}
+			log.Println(err.Error())
+			http.Error(rw, http.StatusText(500), 500)
+			return
+		}
+		if info.IsDir() { // dir named index.html? well, check anyway
+			http.NotFound(rw, r)
+			return
+		}
+
 	}
 
-	if strings.HasSuffix(fp, ".md") {
+	mdExt := strings.HasSuffix(fp, ".md")
+	htmlExt := strings.HasSuffix(fp, ".html")
+	if mdExt || htmlExt {
 		raw, err := fs.ReadFile(x.xfs, fp)
 		if err != nil {
 			log.Println(err.Error())
 			http.Error(rw, http.StatusText(500), 500)
 			return
 		}
-		if err := goldmark.Convert(raw, rw); err != nil {
-			panic(err)
-		}
-	} else if strings.HasSuffix(fp, ".html") {
-		raw, err := fs.ReadFile(x.xfs, fp)
-		if err != nil {
-			log.Println(err.Error())
-			http.Error(rw, http.StatusText(500), 500)
-			return
+		if mdExt {
+			var buf bytes.Buffer
+
+			if err := goldmark.Convert(raw, &buf); err != nil {
+				log.Println(err.Error())
+				http.Error(rw, http.StatusText(500), 500)
+			}
+			raw = buf.Bytes()
 		}
 
 		err = tmpl.Execute(rw, string(raw))
