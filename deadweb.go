@@ -8,20 +8,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-
 	"text/template"
-
 	"github.com/yuin/goldmark"
 )
 
-
-
 type fileServer struct {
 	xfs fs.FS
-
 	tmp *template.Template
-	mu  sync.Mutex
 }
 
 var lp = filepath.Join("templates", "master.html")
