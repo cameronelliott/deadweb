@@ -1,43 +1,78 @@
 package deadweb
 
 import (
-	"bytes"
-	"io/ioutil"
+	"io"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+
+	"text/template"
 
 	"github.com/yuin/goldmark"
 )
 
-//https://www.alexedwards.net/blog/serving-static-sites-with-go
 
-func Server() {
 
-	// fs := http.FileServer(http.Dir("./static"))
-	// http.Handle("/static/", http.StripPrefix("/static/", fs))
-	http.HandleFunc("/", serveMarkdownOrStatic)
+type fileServer struct {
+	xfs fs.FS
 
-	log.Println("Listening on :8080...")
-	err := http.ListenAndServe(":8080", nil)
-	if err != nil {
-		log.Fatal(err)
-	}
+	tmp *template.Template
+	mu  sync.Mutex
 }
 
-func serveMarkdownOrStatic(rw http.ResponseWriter, r *http.Request) {
-	//lp := filepath.Join("templates", "layout.html")
+var lp = filepath.Join("templates", "master.html")
+
+func FileServer(fs fs.FS, parseEvery bool) (http.Handler, error) {
+
+	var tmpl *template.Template
+	var err error
+
+	if !parseEvery {
+		tmpl, err = template.ParseFS(fs, lp)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	x := &fileServer{xfs: fs, tmp: tmpl}
+
+	return x, nil
+}
+
+func (x *fileServer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
+
+	var tmpl *template.Template
+	var err error
+
+	if x.tmp == nil {
+
+		tmpl, err = template.ParseFS(x.xfs, lp)
+		if err != nil {
+			log.Println(err.Error())
+			http.Error(rw, "failed template.ParseFS", 500)
+			return
+		}
+
+	} else {
+		tmpl = x.tmp
+	}
+
 	fp := filepath.Join(".", filepath.Clean(r.URL.Path))
 
 	// Return a 404 if the template doesn't exist
-	info, err := os.Stat(fp)
+	info, err := fs.Stat(x.xfs, fp)
 	if err != nil {
 		if os.IsNotExist(err) {
 			http.NotFound(rw, r)
 			return
 		}
+		log.Println(err.Error())
+		http.Error(rw, http.StatusText(500), 500)
+		return
 	}
 
 	// Return a 404 if the request is for a directory
@@ -46,21 +81,46 @@ func serveMarkdownOrStatic(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	raw, err := ioutil.ReadFile(fp)
-	if err != nil {
-		log.Println(err.Error())
-		http.Error(rw, http.StatusText(500), 500)
-		return
-	}
-
 	if strings.HasSuffix(fp, ".md") {
-		var md bytes.Buffer
-		if err := goldmark.Convert(raw, &md); err != nil {
+		raw, err := fs.ReadFile(x.xfs, fp)
+		if err != nil {
+			log.Println(err.Error())
+			http.Error(rw, http.StatusText(500), 500)
+			return
+		}
+		if err := goldmark.Convert(raw, rw); err != nil {
 			panic(err)
 		}
-		_, _ = rw.Write(md.Bytes())
+	} else if strings.HasSuffix(fp, ".html") {
+		raw, err := fs.ReadFile(x.xfs, fp)
+		if err != nil {
+			log.Println(err.Error())
+			http.Error(rw, http.StatusText(500), 500)
+			return
+		}
+
+		err = tmpl.Execute(rw, string(raw))
+		if err != nil {
+			log.Println(err.Error())
+			http.Error(rw, http.StatusText(500), 500)
+			return
+		}
+
 	} else {
-		_, _ = rw.Write(raw)
+		f, err := x.xfs.Open(fp)
+		if err != nil {
+			log.Println(err.Error())
+			http.Error(rw, http.StatusText(500), 500)
+			return
+		}
+
+		_, err = io.Copy(rw, f)
+		if err != nil {
+			log.Println(err.Error())
+			http.Error(rw, http.StatusText(500), 500)
+			return
+		}
+
 	}
 
 }
