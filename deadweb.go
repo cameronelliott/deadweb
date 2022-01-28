@@ -37,10 +37,6 @@ func FileServer(fs fs.FS, parseEvery bool) (http.Handler, error) {
 	return x, nil
 }
 
-func existsFile(z fs.FS, path string) {
-
-}
-
 func (x *fileServer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	upath := r.URL.Path
 	if !strings.HasPrefix(upath, "/") {
