@@ -130,6 +130,12 @@ func (x *fileServer) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		mt := mime.TypeByExtension(filepath.Ext(fp))
+		//			println(222,fp,mt)
+		if mt != "" {
+			rw.Header().Set("Content-Type", mt)
+		}
+
 		_, err = io.Copy(rw, f)
 		if err != nil {
 			log.Println(err.Error())
