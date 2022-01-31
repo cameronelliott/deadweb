@@ -6,11 +6,20 @@ import (
 	"os"
 
 	"github.com/cameronelliott/deadweb"
+	"github.com/spf13/pflag"
 )
+
+
+var dir = pflag.StringP("dir","d",".","directory to serve")
 
 func main() {
 
-	h, err := deadweb.FileServer(os.DirFS("."), true)
+	pflag.Parse()
+	
+	log.SetFlags(log.Lshortfile)
+
+	println(*dir)
+	h, err := deadweb.FileServer(os.DirFS(*dir), true)
 	if err != nil {
 		log.Fatal(err)
 	}
